@@ -105,6 +105,7 @@ class Obj:
 
     Args:
         path (Union[Path,str], optional): The path to an .obj to read
+        crs (CoordinateReferenceSystem, optional): The underlying CRS of the Obj
 
     Raises:
         FileNotFoundError: The ``path``, if specified, does not exist
@@ -114,8 +115,8 @@ class Obj:
 
     MtlLib = namedtuple('MtlLib', ['base', 'relative'])  # [Path, Union[str,Path]]
 
-    def __init__(self, path: Optional[Union[str, Path]] = None):
-        self._crs = None
+    def __init__(self, path: Optional[Union[str, Path]] = None, crs: CoordinateReferenceSystem = None):
+        self._crs = crs
         self.vertices = np.empty((0, 3), dtype=np.float32)
         self.texCoords = np.empty((0, 2), dtype=np.float32)
         self.normals = np.empty((0, 3), dtype=np.float32)
