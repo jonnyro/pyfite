@@ -469,15 +469,15 @@ class CoordinateConverter:
 
         elif isinstance(fromCrs, Geodetic):
             def c(points):
-                lat, lon, alt = p3d.geodetic2enu(points[:, 1], points[:, 0], points[:, 2], toCrs.lat, toCrs.lon, toCrs.alt)
-                return np.column_stack((lon, lat, alt))
+                e, n, u = p3d.geodetic2enu(points[:, 1], points[:, 0], points[:, 2], toCrs.lat, toCrs.lon, toCrs.alt)
+                return np.column_stack((e, n, u))
             func = c
 
         elif isinstance(fromCrs, Utm):
             def c(points):
                 points = CoordinateConverter.__getPyprojFunc(fromCrs.getProjStr(), Geodetic().getProjStr())(points)
-                lat, lon, alt = p3d.geodetic2enu(points[:, 1], points[:, 0], points[:, 2], toCrs.lat, toCrs.lon, toCrs.alt)
-                return np.column_stack((lon, lat, alt))
+                e, n, u = p3d.geodetic2enu(points[:, 1], points[:, 0], points[:, 2], toCrs.lat, toCrs.lon, toCrs.alt)
+                return np.column_stack((e, n, u))
             func = c
 
         if not func:
