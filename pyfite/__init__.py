@@ -2,6 +2,6 @@
 """
 from . import context_capture
 from . import searching
-from .crs import *
-from .util import *
-from .obj import *
+from . import crs as coordinates
+from . import utils
+from . import obj

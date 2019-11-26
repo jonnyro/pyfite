@@ -6,7 +6,7 @@ with open("README.md", "r") as fh:
     long_description = fh.read()
 
 setuptools.setup(
-    name="pyfite-pkg-rhite", # Replace with your own username
+    name="pyfite",
     version="0.0.1",
     author="Ryan Hite",
     author_email="rhite@ara.com",

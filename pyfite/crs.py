@@ -2,6 +2,8 @@
 
 Supported types of coordinate reference systems are East-North-Up/Local Tangent Plane,
 Geodetic, Geocentric/Earth-Centered Earth-Fixed, UTM, and any valid proj string.
+
+ONLY SUPPORTS WGS84 ELLIPSOID
 """
 import re
 from abc import ABC, abstractmethod
@@ -12,7 +14,7 @@ import numpy as np
 import pymap3d as p3d
 from pyproj import CRS, Transformer
 
-from .util import DECIMAL_REGEX
+from .utils import DECIMAL_REGEX
 
 _OPTIONAL_OFFSET = f'(?: ({DECIMAL_REGEX}) ({DECIMAL_REGEX}) ({DECIMAL_REGEX}))?'
 
@@ -42,14 +44,22 @@ class CoordinateReferenceSystem(ABC):
     @abstractmethod
     def __str__(self):
         """Creates a readable string representing the caller.
+
+        This string will be valid for use in ``CoordinateReferenceSystem.fromStr(str)``
         """
-        raise NotImplementedError('CoordinateReferenceSystem.__str__ is not implemented')
+        raise NotImplementedError()
 
     @abstractmethod
     def __repr__(self):
         """Creates a string that evaluates to the caller.
         """
-        raise NotImplementedError('CoordinateReferenceSystem.__repr__ is not implemented')
+        raise NotImplementedError()
+
+    @abstractmethod
+    def __eq__(self, other):
+        """Determines if two coordinate systems are equivalent.
+        """
+        raise NotImplementedError()
 
     @staticmethod
     def fromStr(srep: str) -> 'CoordinateReferenceSystem':
@@ -74,7 +84,7 @@ class CoordinateReferenceSystem(ABC):
             CrsDefError: If a ``CoordinateReferenceSystem`` can't be interpreted
         """
         if not srep:
-            raise CrsDefError('Cannot instantiate a CoordinateReferenceSystem without an empty string representation')
+            raise CrsDefError('Cannot instantiate a CoordinateReferenceSystem with an empty string representation')
 
         crs = None
         if re.match('^(?:ltp|enu)', srep, re.IGNORECASE):
@@ -89,6 +99,16 @@ class CoordinateReferenceSystem(ABC):
             raise CrsDefError('Unknown CoordinateReferenceSystem definition string')
 
         return crs
+
+    @staticmethod
+    def findStr(string: str) -> str:
+        """Attempts to locate a pyfite compatible CRS substring within ``string``
+        """
+        # NOTE: _srepRegex is always compiled without case sensitivity, so we must recompile
+        # because Pattern[str].pattern does NOT indicate case sensitivities
+        pattern = re.compile(f'(?:{LocalTangentPlane._srepRegex.pattern})|(?:{Geocentric._srepRegex.pattern})|(?:{Geodetic._srepRegex.pattern})|(?:{Utm._srepRegex.pattern})', re.IGNORECASE)  # pylint: disable=protected-access
+        m = re.search(pattern, string)
+        return m[0] if m else ''
 
     @abstractmethod
     def getProjStr(self):
@@ -114,7 +134,7 @@ class CoordinateReferenceSystem(ABC):
         try:
             return self._offset
         except AttributeError:
-            raise NotImplementedError('CoordinateReferenceSystem must set _offset')
+            raise NotImplementedError()
 
     @offset.setter
     def offset(self, offset: Tuple[float, float, float]):
@@ -163,14 +183,19 @@ class LocalTangentPlane(CoordinateReferenceSystem):
         self.lon, self.lat, self.alt, self._offset = lon, lat, alt, offset
 
     def __str__(self):
-        """See ``CoordinateReferenceCystem.__str__``.
+        """See ``CoordinateReferenceSystem.__str__``.
         """
         return f'ENU {self.lon} {self.lat} {self.alt}' + self._getOffsetStr()
 
     def __repr__(self):
-        """See ``CoordinateReferenceCystem.__repr__``.
+        """See ``CoordinateReferenceSystem.__repr__``.
         """
         return f'LocalTangentPlane(lon={self.lon},lat={self.lat},alt={self.alt}' + self._getOffsetRepr() + ')'
+
+    def __eq__(self, other: CoordinateReferenceSystem) -> bool:
+        """See ``CoordinateReferenceSystem.__eq__``.
+        """
+        return isinstance(other, LocalTangentPlane) and self.offset == other.offset
 
     @staticmethod
     def fromStr(srep: str) -> 'LocalTangentPlane':
@@ -211,14 +236,19 @@ class Geocentric(CoordinateReferenceSystem):
         self._offset = offset
 
     def __str__(self):
-        """See ``CoordinateReferenceCystem.__str__``.
+        """See ``CoordinateReferenceSystem.__str__``.
         """
         return 'GCC' + self._getOffsetStr()
 
     def __repr__(self):
-        """See ``CoordinateReferenceCystem.__repr__``.
+        """See ``CoordinateReferenceSystem.__repr__``.
         """
         return 'Geocentric(' + self._getOffsetRepr(includeComma=False) + ')'
+
+    def __eq__(self, other: CoordinateReferenceSystem) -> bool:
+        """See ``CoordinateReferenceSystem.__eq__``.
+        """
+        return isinstance(other, Geocentric) and self.offset == other.offset
 
     @staticmethod
     def fromStr(srep: str) -> 'Geocentric':
@@ -251,14 +281,19 @@ class Geodetic(CoordinateReferenceSystem):
         self._offset = offset
 
     def __str__(self):
-        """See ``CoordinateReferenceCystem.__str__``.
+        """See ``CoordinateReferenceSystem.__str__``.
         """
         return 'GDC' + self._getOffsetStr()
 
     def __repr__(self):
-        """See ``CoordinateReferenceCystem.__repr__``.
+        """See ``CoordinateReferenceSystem.__repr__``.
         """
         return 'Geodetic(' + self._getOffsetRepr(includeComma=False) + ')'
+
+    def __eq__(self, other: CoordinateReferenceSystem) -> bool:
+        """See ``CoordinateReferenceSystem.__eq__``.
+        """
+        return isinstance(other, Geodetic) and self.offset == other.offset
 
     @staticmethod
     def fromStr(srep: str) -> 'Geodetic':
@@ -287,7 +322,7 @@ class Utm(CoordinateReferenceSystem):
         south (bool): Whether to use the south half of ``zone`` or not
         offset (Tuple[float,float,float], optional): The offset by which points are adjusted
     """
-    _srepRegex = re.compile(rf'(?:utm) (\d{{1,2}})(\w){_OPTIONAL_OFFSET}', re.IGNORECASE)
+    _srepRegex = re.compile(rf'(?:utm) (\d{{1,2}})([A-z]){_OPTIONAL_OFFSET}', re.IGNORECASE)
 
     def __init__(self, zone: int, south: bool, offset: Optional[Tuple[float, float, float]] = (0.0, 0.0, 0.0)):
         self.zone, self.south, self._offset = zone, south, offset
@@ -301,6 +336,11 @@ class Utm(CoordinateReferenceSystem):
         """See ``CoordinateReferenceSystem.__repr__``.
         """
         return f'Utm(zone={self.zone},south={self.south}' + self._getOffsetRepr() + ')'
+
+    def __eq__(self, other: CoordinateReferenceSystem) -> bool:
+        """See ``CoordinateReferenceSystem.__eq__``.
+        """
+        return isinstance(other, Utm) and self.offset == other.offset
 
     @staticmethod
     def fromStr(srep: str) -> 'Utm':
@@ -351,6 +391,11 @@ class ProjCrs(CoordinateReferenceSystem):
         """See ``CoordinateReferenceSystem.__repr__``.
         """
         return f'ProjCrs({self._proj})'
+
+    def __eq__(self, other):
+        """See ``CoordinateReferenceSystem.__eq__``.
+        """
+        return isinstance(other, ProjCrs) and self._proj == other._proj  # pylint: disable=protected-access
 
     @staticmethod
     def fromStr(srep: str) -> 'ProjCrs':

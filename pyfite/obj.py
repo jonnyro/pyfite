@@ -5,11 +5,12 @@ import shutil
 from collections import namedtuple
 from io import TextIOWrapper
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import List, Optional, Tuple, Union
 
 import numpy as np
 
 from .crs import CoordinateConverter, CoordinateReferenceSystem, Geocentric
+from .utils import Extents
 
 
 class Obj:  # pylint: disable=too-many-instance-attributes
@@ -20,6 +21,7 @@ class Obj:  # pylint: disable=too-many-instance-attributes
     is provided, Objs can be converted to other CoordinateReferenceSystems.
 
     Attributes:
+        INV_IDX (np.uint32): Value representing an invalid index
         vertices (numpy.array): Array of vertices
         texCoords (numpy.array): Array of texture coordinates
         faces (numpy.array): Array of face
@@ -50,7 +52,7 @@ class Obj:  # pylint: disable=too-many-instance-attributes
     Raises:
         FileNotFoundError: The ``path``, if specified, does not exist
     """
-    __INV_IDX = np.uint32(-1)
+    INV_IDX = np.uint32(-1)
 
     MtlLib = namedtuple('MtlLib', ['base', 'relative'])  # [Path, Union[str,Path]]
 
@@ -80,7 +82,9 @@ class Obj:  # pylint: disable=too-many-instance-attributes
         mtllib = ''
         mtl = ''
         for line in content:
+            self._customLineProcessing(line)
             tokens = line.split()
+
             if len(tokens) == 0 or tokens[0] == '#':
                 continue
             attribute = tokens[0]
@@ -107,12 +111,26 @@ class Obj:  # pylint: disable=too-many-instance-attributes
 
             elif attribute == 'f':
                 for i, token in enumerate(tokens[1:]):
-                    v = [Obj.__INV_IDX] * 3
+                    v = [Obj.INV_IDX] * 3
                     for j, val in enumerate(token.split('/')):
                         if val:
                             v[j] = int(val)
                     self.faces[f][i] = v
                 f += 1
+
+    def _customLineProcessing(self, line: str) -> None:
+        """Performs any custom logic for a line while reading.
+
+        Args:
+            line (str): The line to process
+        """
+        pass  # pylint: disable=unnecessary-pass
+
+    def _determineIfHaveTexNorm(self) -> None:
+        """Updates ``__have_tex`` and ``__have_norm`` to their appropriate values.
+        """
+        [_, self.__have_tex, self.__have_norm] = np.any(np.apply_along_axis(
+            lambda x: any(y != Obj.INV_IDX for y in x), 0, self.faces), 0)
 
     def read(self, path: Union[str, Path]) -> None:
         """Reads an OBJ into memory.
@@ -152,10 +170,9 @@ class Obj:  # pylint: disable=too-many-instance-attributes
         if len(self.materials) >= 2 and self.materials[-1][2] == self.materials[-2][2] or len(self.materials) > 0 and self.materials[-1][2] == len(self.faces):
             self.materials.pop()
 
-        [_, self.__have_tex, self.__have_norm] = np.any(np.apply_along_axis(
-            lambda x: any(y != Obj.__INV_IDX for y in x), 0, self.faces), 0)
+        self._determineIfHaveTexNorm()
 
-    def write(self, dest: Union[str, Path, TextIOWrapper]) -> None:
+    def write(self, dest: Union[str, Path, TextIOWrapper], precision: Union[int, Tuple[int, int, int]] = None) -> None:
         """Writes the Obj and copies textures with it.
 
         Note:
@@ -164,55 +181,78 @@ class Obj:  # pylint: disable=too-many-instance-attributes
 
         Args:
             dest (Union[str,Path,TextIOWrapper]): The destination to write to
+            precision (Union[int,Tuple[int,int,int]], optional): The number of decimal places to write for v, vt, and vn respectively
         """
+        if not isinstance(precision, tuple):
+            precision = (precision, precision, precision)
+        if not all(map(lambda x: isinstance(x, (int, type(None))), precision)):
+            raise ValueError(f'Provided precision was not an int or None: {precision}')
+
+        self._determineIfHaveTexNorm()
+
         if isinstance(dest, str):
             dest = Path(dest)
 
         if isinstance(dest, TextIOWrapper):
-            self._writeV(dest)
-            self._writeVt(dest)
-            self._writeVn(dest)
+            self._writeV(dest, precision[0])
+            self._writeVt(dest, precision[1])
+            self._writeVn(dest, precision[2])
             self._writeF(dest)
             destParent = Path(dest.name).parent
         else:
             destParent = dest.parent
             os.makedirs(dest.parent, exist_ok=True)
             with open(dest, 'w+', 8192) as obj:
-                self._writeV(obj)
-                self._writeVt(obj)
-                self._writeVn(obj)
+                self._writeV(obj, precision[0])
+                self._writeVt(obj, precision[1])
+                self._writeVn(obj, precision[2])
                 self._writeF(obj)
 
         self._copyMaterials(destParent)
 
-    def _writeV(self, fout: TextIOWrapper) -> None:
+    def _writeV(self, fout: TextIOWrapper, precision: int) -> None:
         """Writes vertices to ``fout``.
 
         Args:
             fout (TextIOWrapper): The file descriptor to write to
+            precision (int): The number of decimal places to write (None implies write max precision)
         """
+        if precision is not None:
+            formatStr = f'v {{:.{precision}f}} {{:.{precision}f}} {{:.{precision}f}}\n'
+        else:
+            formatStr = 'v {} {} {}\n'
         for v in self.vertices:
-            fout.write(f'v {v[0]} {v[1]} {v[2]}\n')
+            fout.write(formatStr.format(*v))
 
-    def _writeVt(self, fout) -> None:
+    def _writeVt(self, fout: TextIOWrapper, precision: int) -> None:
         """Writes texture coordinates to ``fout``.
 
         Args:
             fout (TextIOWrapper): The file descriptor to write to
+            precision (int): The number of decimal places to write (None implies write max precision)
         """
+        if precision is not None:
+            formatStr = f'vt {{:.{precision}f}} {{:.{precision}f}}\n'
+        else:
+            formatStr = 'vt {} {}\n'
         for vt in self.texCoords:
-            fout.write(f'vt {vt[0]} {vt[1]}\n')
+            fout.write(formatStr.format(*vt))
 
-    def _writeVn(self, fout) -> None:
+    def _writeVn(self, fout: TextIOWrapper, precision: int) -> None:
         """Writes vertex normals to ``fout``.
 
         Args:
             fout (TextIOWrapper): The file descriptor to write to
+            precision (int): The number of decimal places to write (None implies write max precision)
         """
+        if precision is not None:
+            formatStr = f'vn {{:.{precision}f}} {{:.{precision}f}} {{:.{precision}f}}\n'
+        else:
+            formatStr = 'vn {} {} {}\n'
         for vn in self.normals:
-            fout.write(f'vn {vn[0]} {vn[1]} {vn[2]}\n')
+            fout.write(formatStr.format(*vn))
 
-    def _writeF(self, fout) -> None:
+    def _writeF(self, fout: TextIOWrapper) -> None:
         """Writes faces and mtllib/usemtl to ``fout``.
 
         Args:
@@ -247,7 +287,7 @@ class Obj:  # pylint: disable=too-many-instance-attributes
 
             # First write out the faces of the lines for the current mat
             for j in range(i, stop):
-                face = map(lambda x: str(x) if x != Obj.__INV_IDX else '', self.faces[j].reshape((9,)))
+                face = map(lambda x: str(x) if x != Obj.INV_IDX else '', self.faces[j].reshape((9,)))
                 fout.write(f'f {vert_pattern} {vert_pattern} {vert_pattern}\n'.format(*face))
 
             # Then write the mtllib and usemtl lines for the next material in the list
@@ -335,11 +375,13 @@ class Obj:  # pylint: disable=too-many-instance-attributes
         Warn:
             Does not convert vertex normals
 
-        Args
+        Args:
+            toCrs (CoordinateReferenceSystem): The target coordinate system to convert to
         """
-        self.vertices = CoordinateConverter(self._crs, toCrs)(self.vertices)
-        self._crs = toCrs
-        # TODO(rhite): Handle normals
+        if self._crs != toCrs:
+            self.vertices = CoordinateConverter(self._crs, toCrs)(self.vertices)
+            self._crs = toCrs
+            # TODO(rhite): Handle normals
 
     def __recordMatChange(self, mtllib, mtl, f):
         """Tracks indices at which materials change
@@ -351,11 +393,21 @@ class Obj:  # pylint: disable=too-many-instance-attributes
             else:
                 self.materials.append([mtllib, mtl, f])
 
+    def getNativeExtents(self) -> Extents:
+        """Gets the min and max along the x-, y-, and z- axis.
+
+        Returns:
+            Extents: The extents of the obj in its native coordinate space.
+        """
+        localMin, localMax = np.min(self.vertices, axis=0).reshape((3,)), np.max(self.vertices, axis=0).reshape((3,))
+        x, y, z = zip(localMin, localMax)
+        return Extents(*x, *y, *z)
+
 
 class AittObj(Obj):
     """An implementation of Obj specific for AITT outputs.
     """
-    def write(self, dest: Union[str, Path, TextIOWrapper]) -> None:
+    def write(self, dest: Union[str, Path, TextIOWrapper], precision: Union[int, Tuple[int, int, int]] = None) -> None:
         """Write the obj with AITT-compliant format
 
         AITT databases require a comment in the first line of the form:
@@ -363,7 +415,7 @@ class AittObj(Obj):
         where X, Y, and Z are standard GCC coordinates representing (0,0,0)
         in the obj.
 
-        Refer to ``Obj`` for
+        Refer to ``Obj`` for parameter descriptions.
         """
         if not self._crs:
             raise RuntimeError("Cannot write AittObj with no original CoordinateReferenceSystem")
@@ -379,5 +431,35 @@ class AittObj(Obj):
             dest = open(dest, 'w+', 8192)
             dest.write("# GCC Offset (local origin) : {} {} {}\n".format(*self._crs.offset))
 
-        super().write(dest)
+        super().write(dest, precision)
         dest.close()
+
+
+class SelfGeoreferencingObj(Obj):
+    """An implementation of Obj which attempts to georeference itself.
+
+    On read, it will attempt to parse a pyfite compatible CRS string in a comment.
+    On write, it will first write a comment of the pyfite compatible CRS string of the Obj.
+    """
+    def write(self, dest: Union[str, Path, TextIOWrapper], precision: Union[int, Tuple[int, int, int]] = None) -> None:
+        """Write the obj with a pyfite compatible CRS string as a comment.
+
+        Refer to ``Obj`` for parameter descriptions.
+        """
+        if isinstance(dest, (str, Path)):
+            dest = open(dest, 'w', 8192)
+            if self._crs is not None:
+                dest.write('# {}\n'.format(str(self._crs)))
+
+        super().write(dest, precision)
+        dest.close()
+
+    def _customLineProcessing(self, line: str) -> None:
+        """Attempts to parse any comments as a ``CoordinateReferenceSystem`` string
+
+        Refer to ``Obj._customLineProcessing`` for parameter descriptions.
+        """
+        if not self._crs and line.startswith('#'):
+            crsStr = CoordinateReferenceSystem.findStr(line)
+            if crsStr:
+                self._crs = CoordinateReferenceSystem.fromStr(crsStr)

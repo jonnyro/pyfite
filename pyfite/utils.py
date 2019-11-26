@@ -19,6 +19,61 @@ class ParseError(Exception):
     def __init__(self, message: str = 'Failed to parse string'):  # pylint: disable=useless-super-delegation
         super().__init__(message)
 
+class Extents:
+    """Container for min/max values along three axes.
+
+    Args:
+        args: Six numeric values - may be NaN
+
+    Raises:
+        RuntimeError: If bad parameters are passed
+        TypeError: If any parameters are not numeric
+    """
+    def __init__(self, *args):
+        if len(args) != 6:
+            raise RuntimeError('Extents must be insantiated with exactly 6 numbers')
+
+        self.minX, self.maxX, self.minY, self.maxY, self.minZ, self.maxZ = args
+
+        if not all(map(
+                lambda x: math.isfinite(x) or math.isinf(x) or math.isnan(x),
+                (self.minX, self.maxX, self.minY, self.maxY, self.minZ, self.maxZ))):
+            raise TypeError('Cannot instantiate Extents with non-numeric values')
+
+    def __str__(self):
+        """Provides string representation of Extents.
+        """
+        return f'([{self.minX}, {self.maxX}], [{self.minY}, {self.maxY}], [{self.minZ}, {self.maxZ}])'
+
+    def __repr__(self):
+        """See ``Extents.__str__``
+        """
+        return str(self)
+
+    def getMin(self) -> Tuple[float, float, float]:
+        """Gets the minimum of the extents.
+
+        Returns:
+            Tuple[float,float,float]: The minimum of the extents
+        """
+        return (self.minX, self.minY, self.minZ)
+
+    def getMax(self) -> Tuple[float, float, float]:
+        """Gets the maximum of the extents
+
+        Returns:
+            Tuple[float,float,float]: The maximum of the extents
+        """
+        return (self.maxX, self.maxY, self.maxZ)
+
+    def getCenter(self) -> Tuple[float, float, float]:
+        """Gets the center of the extents.
+
+        Returns:
+            Tuple[float,float,float]: The center of the extents
+        """
+        return (self.minX + self.maxX) / 2, (self.minY + self.maxY) / 2, (self.minZ + self.maxZ) / 2
+
 def static_vars(**kwargs):
     """Decorates a function with static variables
 
@@ -30,7 +85,7 @@ def static_vars(**kwargs):
         return func
     return decorate
 
-def parseExtents(extents: str) -> Tuple[float, float, float, float, float, float]:
+def parseExtents(extents: str) -> Extents:
     """Parses extents from a string.
 
     Parsed strings are expected to be in the form (with spaces being optional) ([minX, maxX], [minY, maxY], [minZ, maxZ]).
@@ -40,7 +95,7 @@ def parseExtents(extents: str) -> Tuple[float, float, float, float, float, float
         extents (str): The extents string to parse
 
     Returns:
-        Tuple[float x 6]: The parsed min/max for X, Y, and Z
+        Extents: The parsed min/max for X, Y, and Z
 
     Raises:
         ParseError: If the string can't be matched or any values aren't interpretable

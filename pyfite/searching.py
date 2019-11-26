@@ -1,34 +1,32 @@
 """Utility classes for searching directories and archives.
 """
-
 import os
 import re
 import zipfile
-from typing import Generator, List, Pattern, Tuple
+from abc import ABC, abstractmethod
+from typing import Generator, Iterable, List, Pattern, Tuple
 
-class ArchiveSearcher:
-    """Searches through archive contents without extracting any data.
+def _findAllByExtensions(self, extensions: Iterable[str], caseSensitive=False) -> List[str]:
+    """Finds all files with one of the given ``extensions``
 
-    Note:
-        It is assumed that the archive located at ``path`` exists
-        and is of the ZIP format, but the file extension need not
-        be ".zip".
-
-        Values returned are, unless otherwise stated, full paths
-        to the relevant file relative to the archive root.
+    All extensions will be prefixed with a . before searching if one is not already present.
 
     Args:
-        path (str): The path to an archive to search
+        extensions (Iterable[str]): The list of extensions to search for
+        caseSensitive (bool): Whether extensions should be treated as case sensitive
 
-    Raises:
-        zipfile.BadZipFile: If ``path`` isn't a ZIP file (regardless of extension)
+    Returns:
+        List[str]: List of paths found with one of the given ``extensions``
     """
-    def __init__(self, path: str):
-        self._archive = zipfile.ZipFile(path, 'r')
+    extensions = [ext[1:] if ext.startswith('.') else ext for ext in extensions if len(ext) > 0]
+    patternStr = f'.*\\.(?:{"|".join(extensions)})$'
+    pattern = re.compile(patternStr) if caseSensitive else re.compile(patternStr, re.IGNORECASE)
+    return self.findAll(pattern)
 
-    def __del__(self):
-        self._archive.close()
-
+class Searcher(ABC):
+    """Interface for Searchers
+    """
+    @abstractmethod
     def _findAll(self, pattern: Pattern[str], requireMatch=False) -> Generator[str, None, None]:
         """Finds all files in the archive that match ``pattern``.
 
@@ -39,8 +37,7 @@ class ArchiveSearcher:
         Returns:
             Generator[str]: A generator that yields matched paths
         """
-        predFunc = re.match if requireMatch else re.search
-        return (entry.filename for entry in self._archive.infolist() if predFunc(pattern, entry.filename) and entry.file_size > 0)
+        raise NotImplementedError()
 
     def findAll(self, pattern: Pattern[str], requireMatch=False) -> List[str]:
         """Finds all files in the archive that match ``pattern``.
@@ -66,6 +63,52 @@ class ArchiveSearcher:
             str: The first file that matched ``pattern``
         """
         return next(self._findAll(pattern, requireMatch), None)
+
+    def findAllByExtensions(self, extensions: Iterable[str], caseSensitive=False) -> List[str]:
+        """Finds all files with one of the given ``extensions``
+
+        All extensions will be prefixed with a . before searching if one is not already present.
+
+        Args:
+            extensions (Iterable[str]): The list of extensions to search for
+            caseSensitive (bool): Whether extensions should be treated as case sensitive
+
+        Returns:
+            List[str]: List of paths found with one of the given ``extensions``
+        """
+        extensions = [ext[1:] if ext.startswith('.') else ext for ext in extensions if len(ext) > 0]
+        patternStr = f'.*\\.(?:{"|".join(extensions)})$'
+        pattern = re.compile(patternStr) if caseSensitive else re.compile(patternStr, re.IGNORECASE)
+        return self.findAll(pattern)
+
+class ArchiveSearcher(Searcher):
+    """Searches through archive contents without extracting any data.
+
+    Note:
+        It is assumed that the archive located at ``path`` exists
+        and is of the ZIP format, but the file extension need not
+        be ".zip".
+
+        Values returned are, unless otherwise stated, full paths
+        to the relevant file relative to the archive root.
+
+    Args:
+        path (str): The path to an archive to search
+
+    Raises:
+        zipfile.BadZipFile: If ``path`` isn't a ZIP file (regardless of extension)
+    """
+    def __init__(self, path: str):
+        self._archive = zipfile.ZipFile(path, 'r')
+
+    def __del__(self):
+        self._archive.close()
+
+    def _findAll(self, pattern: Pattern[str], requireMatch=False) -> Generator[str, None, None]:
+        """See ``Searcher._findAll``
+        """
+        predFunc = re.match if requireMatch else re.search
+        return (entry.filename for entry in self._archive.infolist() if predFunc(pattern, entry.filename) and entry.file_size > 0)
 
 class StplsBundleSearcher(ArchiveSearcher):
     """Intelligently searches through STPLS Bundles.
@@ -110,7 +153,7 @@ class StplsBundleSearcher(ArchiveSearcher):
         metadataDir = metadataPath[:metadataPath.rfind('/') + 1]
         return (metadataPath, self.findAll(re.compile(f'^{metadataDir}.*{pattern}.*')))
 
-class DirectorySearcher:
+class DirectorySearcher(Searcher):
     """Searches recursively through directories for files matching a pattern.
 
     Note:
@@ -128,14 +171,7 @@ class DirectorySearcher:
             raise NotADirectoryError()
 
     def _findAll(self, pattern: Pattern[str], requireMatch=False) -> Generator[str, None, None]:
-        """Finds all files in the root directory that match ``pattern``.
-
-        Args:
-            pattern (Pattern[str]): The pattern to use for matching
-            requireMatch (bool): Whether matches must begin at the beginning of the string
-
-        Returns:
-            Generator[str]: A generator that yields matched paths
+        """See ``Searcher._findAll``
         """
         predFunc = re.match if requireMatch else re.search
         def gen():
@@ -145,28 +181,3 @@ class DirectorySearcher:
                     if predFunc(pattern, path):
                         yield path
         return gen()
-
-    def findAll(self, pattern: Pattern[str], requireMatch=False) -> List[str]:
-        """Finds all files in the root directory that match ``pattern``.
-
-        Args:
-            pattern (Pattern[str]): The pattern to use for matching
-            requireMatch (bool): Whether matches must begin at the beginning of the string
-
-        Returns:
-            List[str]: The list of all files that matched ``pattern``
-        """
-        return list(self._findAll(pattern, requireMatch))
-
-    def findFirst(self, pattern: Pattern[str], requireMatch=False) -> str:
-        """Finds the first file in the root directory that matches ``pattern``.
-
-        Args:
-            pattern (Pattern[str]): The pattern to use for matching
-            requireMatch (bool): Whether matches must begin at the beginning of the string
-
-        Returns:
-            None: If no files matched ``pattern``
-            str: The first file that matched ``pattern``
-        """
-        return next(self._findAll(pattern, requireMatch))
