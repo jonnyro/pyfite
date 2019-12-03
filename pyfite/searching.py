@@ -110,6 +110,23 @@ class ArchiveSearcher(Searcher):
         predFunc = re.match if requireMatch else re.search
         return (entry.filename for entry in self._archive.infolist() if predFunc(pattern, entry.filename) and entry.file_size > 0)
 
+    def extractFiles(self, dest: str, files: List[str]) -> None:
+        """Extracts the ``files`` in the archive to ``dest``
+
+        The paths in ``files`` are expected to be relative to the archive root and
+        directory structure within the archive will be maintained in ``dest``
+
+        Args:
+            dest (str): The folder into which to extract files
+            files (List[str]): The list of paths within the archive to extract
+        """
+        for path in files:
+            with self._archive.open(path) as content:
+                target = os.path.join(dest, path)
+                os.makedirs(os.path.dirname(target), exist_ok=True)
+                with open(target, 'wb+') as file:
+                    file.write(content.read())
+
 class StplsBundleSearcher(ArchiveSearcher):
     """Intelligently searches through STPLS Bundles.
 
@@ -146,12 +163,17 @@ class StplsBundleSearcher(ArchiveSearcher):
         if not metadataPath:
             return (None, [])
 
+        # Retrieving any possible flags on pattern
+        flags = 0
+        if isinstance(pattern, Pattern):
+            flags = pattern.flags
+
         # Constructing a new pattern for supplements so need string form of pattern
         if not isinstance(pattern, str):
             pattern = pattern.pattern
 
         metadataDir = metadataPath[:metadataPath.rfind('/') + 1]
-        return (metadataPath, self.findAll(re.compile(f'^{metadataDir}.*{pattern}.*')))
+        return (metadataPath, self.findAll(re.compile(f'^{metadataDir}.*{pattern}.*', flags)))
 
 class DirectorySearcher(Searcher):
     """Searches recursively through directories for files matching a pattern.
