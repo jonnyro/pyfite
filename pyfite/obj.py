@@ -9,8 +9,8 @@ from typing import List, Optional, Tuple, Union
 
 import numpy as np
 
-from .crs import CoordinateConverter, CoordinateReferenceSystem, Geocentric
-from .utils import Extents
+from pyfite.coordinates import CoordinateConverter, CoordinateReferenceSystem, Geocentric
+from pyfite.utils import Extents
 
 
 class Obj:  # pylint: disable=too-many-instance-attributes

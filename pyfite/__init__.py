@@ -1,7 +1,11 @@
-"""See parent __init__.py
+"""Package containing capabilities frequently needed for FITE.
+
+This package includes classes for reading/writing .objs,
+performing coordinate conversions, searching archives and directories,
+and interacting with Context Capture metadata.xml files.
 """
-from . import context_capture
-from . import searching
-from . import crs as coordinates
-from . import utils
-from . import obj
+import pyfite.context_capture
+import pyfite.searching
+import pyfite.coordinates
+import pyfite.utils
+import pyfite.obj

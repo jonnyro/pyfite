@@ -1,25 +1,28 @@
 """Builds a .whl for the pyfite package.
 """
+import os
+from pathlib import Path
+
 import setuptools
 
-with open("README.md", "r") as fh:
+os.chdir(Path(__file__).parent)
+
+with open('README.md', 'r') as fh:
     long_description = fh.read()
+with open('requirements.txt', 'r') as fh:
+    requirements = [req for req in fh.readlines() if req]
 
 setuptools.setup(
     name="pyfite",
-    version="0.0.1",
+    version="0.0.2",
     author="Ryan Hite",
     author_email="rhite@ara.com",
     description="Basic module containing FITE helper classes.",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/pypa/sampleproject",
-    packages=setuptools.find_packages(),
-    install_requires=[
-        "numpy>=1.17.3",
-        "pymap3d>=2.1.0",
-        "pyproj>=2.4.1"
-    ],
+    packages=['pyfite'],
+    exclude_package_data={'pyfite':['_tests/*','*.md','*.txt']},
+    install_requires=requirements,
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",

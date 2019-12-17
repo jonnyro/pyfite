@@ -5,18 +5,37 @@ Geodetic, Geocentric/Earth-Centered Earth-Fixed, UTM, and any valid proj string.
 
 ONLY SUPPORTS WGS84 ELLIPSOID
 """
+import math
 import re
 from abc import ABC, abstractmethod
-from math import floor
 from typing import Callable, Optional, Tuple, Union
 
 import numpy as np
 import pymap3d as p3d
 from pyproj import CRS, Transformer
 
-from .utils import DECIMAL_REGEX
+from pyfite.utils import DECIMAL_REGEX, static_vars
+
+__pdoc__ = {}
 
 _OPTIONAL_OFFSET = f'(?: ({DECIMAL_REGEX}) ({DECIMAL_REGEX}) ({DECIMAL_REGEX}))?'
+
+@static_vars(m1=111132.92, m2=-559.82, m3=1.175, m4=-0.0023, p1=111412.84, p2=-93.5, p3=0.118)
+def computeDegreeSize(lat: float) -> Tuple[float, float]:
+    """Computes the size (m) of 1 degree of lon/lat at a given ``lat``.
+
+    Obtained from http://www.csgnetwork.com/degreelenllavcalc.html
+
+    Args:
+        lat (float): The latitude at which to compute the size of 1 degree
+
+    Returns:
+        Tuple[float,float]: The length of 1 degree longitude and latitude at ``lat``
+    """
+    lat = math.radians(lat)
+    latlen = computeDegreeSize.m1 + (computeDegreeSize.m2 * math.cos(2 * lat)) + (computeDegreeSize.m3 * math.cos(4 * lat)) + (computeDegreeSize.m4 * math.cos(6 * lat))
+    lonlen = (computeDegreeSize.p1 * math.cos(lat)) + (computeDegreeSize.p2 * math.cos(3 * lat)) + (computeDegreeSize.p3 * math.cos(5 * lat))
+    return (lonlen, latlen)
 
 
 class CrsDefError(Exception):
@@ -45,7 +64,7 @@ class CoordinateReferenceSystem(ABC):
     def __str__(self):
         """Creates a readable string representing the caller.
 
-        This string will be valid for use in ``CoordinateReferenceSystem.fromStr(str)``
+        This string will be valid for use in ``CoordinateReferenceSystem.fromStr``
         """
         raise NotImplementedError()
 
@@ -199,7 +218,7 @@ class LocalTangentPlane(CoordinateReferenceSystem):
 
     @staticmethod
     def fromStr(srep: str) -> 'LocalTangentPlane':
-        """See ``CoordinateReferenceSystem.fromString``.
+        """See ``CoordinateReferenceSystem.fromStr``.
         """
         sm = LocalTangentPlane._srepRegex.match(srep)
         if not sm:
@@ -252,7 +271,7 @@ class Geocentric(CoordinateReferenceSystem):
 
     @staticmethod
     def fromStr(srep: str) -> 'Geocentric':
-        """See ``CoordinateReferenceSystem.fromString``.
+        """See ``CoordinateReferenceSystem.fromStr``.
         """
         sm = Geocentric._srepRegex.match(srep)
         if not sm:
@@ -297,7 +316,7 @@ class Geodetic(CoordinateReferenceSystem):
 
     @staticmethod
     def fromStr(srep: str) -> 'Geodetic':
-        """See ``CoordinateReferenceSystem.fromString``.
+        """See ``CoordinateReferenceSystem.fromStr``.
         """
         sm = Geodetic._srepRegex.match(srep)
         if not sm:
@@ -362,7 +381,7 @@ class Utm(CoordinateReferenceSystem):
         # Note that a third argument is provided as optional for cases in which
         # a 3d point is expanded with *
         # TODO(rhite): handle special EU case?
-        return Utm(floor((lon + 180) / 360 * 60) + 1, lat < 0)
+        return Utm(math.floor((lon + 180) / 360 * 60) + 1, lat < 0)
 
     def getProjStr(self) -> str:
         """See ``CoordinateReferenceSystem.getProjStr``
@@ -545,3 +564,4 @@ class CoordinateConverter:
             transformer = Transformer.from_crs(CRS.from_string(fromCrs), CRS.from_string(toCrs), always_xy=True)
             return np.column_stack(transformer.transform(points[:, 0], points[:, 1], points[:, 2]))
         return c
+__pdoc__['CoordinateConverter.__call__'] = CoordinateConverter.__call__.__doc__

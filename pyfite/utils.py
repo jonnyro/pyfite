@@ -100,29 +100,12 @@ def parseExtents(extents: str) -> Extents:
     Raises:
         ParseError: If the string can't be matched or any values aren't interpretable
     """
-    match = re.match(__EXTENTS_REGEX, extents)
+    match = __EXTENTS_REGEX.match(extents)
     if not match:
         raise ParseError('Provided extents did not match expected pattern')
 
     vals = [0] * 6  # Prepare array
     for i in range(1, 7):  # Expect to access match[1] through match[6]
-        vals[i] = float(match[i])
+        vals[i-1] = float(match[i])
 
-    return tuple(vals)
-
-@static_vars(m1=111132.92, m2=-559.82, m3=1.175, m4=-0.0023, p1=111412.84, p2=-93.5, p3=0.118)
-def computeDegreeSize(lat: float) -> Tuple[float, float]:
-    """Computes the size (m) of 1 degree of lon/lat at a given ``lat``.
-
-    Obtained from http://www.csgnetwork.com/degreelenllavcalc.html
-
-    Args:
-        lat (float): The latitude at which to compute the size of 1 degree
-
-    Returns:
-        Tuple[float,float]: The length of 1 degree longitude and latitude at ``lat``
-    """
-    lat = math.radians(lat)
-    latlen = computeDegreeSize.m1 + (computeDegreeSize.m2 * math.cos(2 * lat)) + (computeDegreeSize.m3 * math.cos(4 * lat)) + (computeDegreeSize.m4 * math.cos(6 * lat))
-    lonlen = (computeDegreeSize.p1 * math.cos(lat)) + (computeDegreeSize.p2 * math.cos(3 * lat)) + (computeDegreeSize.p3 * math.cos(5 * lat))
-    return (lonlen, latlen)
+    return Extents(*vals)
