@@ -1,4 +1,10 @@
 """Utility classes for searching directories and archives.
+
+Note:
+    Though documentation may say "match" when referring to searching for patterns,
+    the method ``re.match`` is not used in this module. Instead, ``re.search`` is
+    used, and any finer control of searching/matching logic is expected to fall on
+    the patterns provided to ``Searcher`` classes.
 """
 import os
 import re
@@ -7,7 +13,7 @@ from abc import ABC, abstractmethod
 from typing import Generator, Iterable, List, Pattern, Tuple
 
 def _findAllByExtensions(self, extensions: Iterable[str], caseSensitive=False) -> List[str]:
-    """Finds all files with one of the given ``extensions``
+    """Finds all files with one of the given ``extensions``.
 
     All extensions will be prefixed with a . before searching if one is not already present.
 
@@ -27,42 +33,57 @@ class Searcher(ABC):
     """Interface for Searchers
     """
     @abstractmethod
-    def _findAll(self, pattern: Pattern[str], requireMatch=False) -> Generator[str, None, None]:
+    def _findAll(self, pattern: Pattern[str]) -> Generator[str, None, None]:
         """Finds all files in the archive that match ``pattern``.
+
+        Note:
+            Paths starting from roots of searchers will not include leading slashes, so
+            any patterns intended to match at the starts of paths (using "^") should not
+            expect to match a leading slash. As such, values returned will not have leading
+            slashes.
 
         Args:
             pattern (Pattern[str]): The pattern to use for matching
-            requireMatch (bool): Whether matches must begin at the beginning of the string
 
         Returns:
             Generator[str]: A generator that yields matched paths
         """
         raise NotImplementedError()
 
-    def findAll(self, pattern: Pattern[str], requireMatch=False) -> List[str]:
+    def findAll(self, pattern: Pattern[str]) -> List[str]:
         """Finds all files in the archive that match ``pattern``.
+
+        Note:
+            Paths starting from roots of searchers will not include leading slashes, so
+            any patterns intended to match at the starts of paths (using "^") should not
+            expect to match a leading slash. As such, values returned will not have leading
+            slashes.
 
         Args:
             pattern (Pattern[str]): The pattern to use for matching
-            requireMatch (bool): Whether matches must begin at the beginning of the string
 
         Returns:
             List[str]: The list of all files that matched ``pattern``
         """
-        return list(self._findAll(pattern, requireMatch))
+        return list(self._findAll(pattern))
 
-    def findFirst(self, pattern: Pattern[str], requireMatch=False) -> str:
+    def findFirst(self, pattern: Pattern[str]) -> str:
         """Finds the first file in the archive that matches ``pattern``.
+
+        Note:
+            Paths starting from roots of searchers will not include leading slashes, so
+            any patterns intended to match at the starts of paths (using "^") should not
+            expect to match a leading slash. As such, values returned will not have leading
+            slashes.
 
         Args:
             pattern (Pattern[str]): The pattern to use for matching
-            requireMatch (bool): Whether matches must begin at the beginning of the string
 
         Returns:
             None: If no files matched Pattern[str]
             str: The first file that matched ``pattern``
         """
-        return next(self._findAll(pattern, requireMatch), None)
+        return next(self._findAll(pattern), None)
 
     def findAllByExtensions(self, extensions: Iterable[str], caseSensitive=False) -> List[str]:
         """Finds all files with one of the given ``extensions``
@@ -104,23 +125,28 @@ class ArchiveSearcher(Searcher):
     def __del__(self):
         self._archive.close()
 
-    def _findAll(self, pattern: Pattern[str], requireMatch=False) -> Generator[str, None, None]:
+    def _findAll(self, pattern: Pattern[str]) -> Generator[str, None, None]:
         """See ``Searcher._findAll``
         """
-        predFunc = re.match if requireMatch else re.search
-        return (entry.filename for entry in self._archive.infolist() if predFunc(pattern, entry.filename) and entry.file_size > 0)
+        return (entry.filename for entry in self._archive.infolist() if re.search(pattern, entry.filename) and entry.file_size > 0)
 
     def extractFiles(self, dest: str, files: List[str]) -> None:
         """Extracts the ``files`` in the archive to ``dest``
 
         The paths in ``files`` are expected to be relative to the archive root and
-        directory structure within the archive will be maintained in ``dest``
+        directory structure within the archive will be maintained in ``dest``.
+
+        Note:
+            Paths should not be prefixed with a leading slash. If one is present,
+            it will be removed.
 
         Args:
             dest (str): The folder into which to extract files
             files (List[str]): The list of paths within the archive to extract
         """
         for path in files:
+            if path[0] in ['/', '\\']:
+                path = path[1:]  # Safe to do even on empty strings
             with self._archive.open(path) as content:
                 target = os.path.join(dest, path)
                 os.makedirs(os.path.dirname(target), exist_ok=True)
@@ -143,13 +169,15 @@ class StplsBundleSearcher(ArchiveSearcher):
             None: If there is no metadata.xml
             str: The location of the metadata.xml file in the archive
         """
-        return self.findFirst(re.compile('.*metadata.xml$', re.IGNORECASE), requireMatch=True)
+        return self.findFirst(re.compile('.*metadata.xml$', re.IGNORECASE))
 
     def findObjsAndSupplements(self, pattern: Pattern[str]) -> Tuple[str, List[str]]:
         """Finds the metadata.xml and matching Objs.
 
         All files adjacent to or in sibling/sub-sibling directories of a metadata.xml
-        are assumed to be supplemental and will all be checked for match with ``pattern``
+        are assumed to be supplemental and will all be checked for match with ``pattern``.
+        Paths searched for ``pattern`` will be relative to the directory containing
+        metadata.xml rather than the archive root.
 
         Args:
             pattern (Pattern[str]): The pattern to use for matching
@@ -163,17 +191,10 @@ class StplsBundleSearcher(ArchiveSearcher):
         if not metadataPath:
             return (None, [])
 
-        # Retrieving any possible flags on pattern
-        flags = 0
-        if isinstance(pattern, Pattern):
-            flags = pattern.flags
+        metadataDir = metadataPath[:metadataPath.rfind('/') + 1]  # metadataDir will include the ending '/'
+        paths = list(map(lambda p: metadataDir + p, filter(lambda p: re.search(pattern, p), map(lambda p: p[len(metadataDir):], self.findAll(re.compile(f'^{metadataDir}'))))))
 
-        # Constructing a new pattern for supplements so need string form of pattern
-        if not isinstance(pattern, str):
-            pattern = pattern.pattern
-
-        metadataDir = metadataPath[:metadataPath.rfind('/') + 1]
-        return (metadataPath, self.findAll(re.compile(f'^{metadataDir}.*{pattern}.*', flags)))
+        return (metadataPath, paths)
 
 class DirectorySearcher(Searcher):
     """Searches recursively through directories for files matching a pattern.
@@ -192,14 +213,15 @@ class DirectorySearcher(Searcher):
         if not os.path.isdir(self._root):
             raise NotADirectoryError()
 
-    def _findAll(self, pattern: Pattern[str], requireMatch=False) -> Generator[str, None, None]:
+    def _findAll(self, pattern: Pattern[str]) -> Generator[str, None, None]:
         """See ``Searcher._findAll``
         """
-        predFunc = re.match if requireMatch else re.search
         def gen():
             for root, _, files in os.walk(self._root):
                 for file in files:
-                    path = os.path.join(root, file)
-                    if predFunc(pattern, path):
-                        yield path
+                    path = os.path.join(root, file)[len(self._root):]
+                    if path[0] in ['/', '\\']:
+                        path = path[1:]  # Safe to do even on empty strings
+                    if re.search(pattern, path):
+                        yield os.path.join(self._root, path)
         return gen()
